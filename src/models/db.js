@@ -13,12 +13,20 @@ dotenv.config();
 //     ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false
 // });
 
+// const pool = new Pool({
+//   connectionString: process.env.DATABASE_URL,
+//   ssl: process.env.NODE_ENV === "production"
+//     ? { rejectUnauthorized: false } // for Render
+//     : false,
+//   max: 10
+// });
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === "production"
-    ? { rejectUnauthorized: false } // for Render
-    : false,
-  max: 10
+  ssl: {
+    rejectUnauthorized: false, // required for Render, Neon, etc.
+  },
+  max: 10,
 });
 
 

@@ -365,18 +365,20 @@ router.put('/update-blog/:id', async (req, res) => {
   router.post('/add-admin-blog', async (req, res) => {
     const blog=req.body.blog;
 
-    console.log(blog);
+    // console.log(blog);
     const client = await pool.connect();
+
+    const date_posted = new Date();
 
     try {
       await client.query('BEGIN');
   
       // Insert blog post
       const postResult = await client.query(
-        `INSERT INTO blogposts (title, content, author_id, society_id, by_admin)
+        `INSERT INTO blogposts (title, content, society_id, by_admin, post_date)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id`,
-        [blog.title, blog.content, blog.author, blog.society_id, true]
+        [blog.title, blog.content, blog.society_id, true, date_posted]
       );
   
     //   console.log('postResult', postResult);

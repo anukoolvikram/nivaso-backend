@@ -64,9 +64,8 @@ router.post("/register", async (req, res) => {
             "INSERT INTO federation (email, password, is_federation, name, apartment, tenement, federation_code) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
             [email, hashedPassword, isFederation, name, apartment, tenement, federation_code]
         );
-        // console.log('heey')
-        // console.log(userResult.rows[0])
-        const primary_id = userResult.rows[0].id;
+
+        const id = userResult.rows[0].id;
 
         // Create Societies
         const no_of_apartment = parseInt(apartment);
@@ -110,7 +109,7 @@ router.post("/register", async (req, res) => {
 
         // Generate JWT Token
         const token = jwt.sign(
-            { primary_id, email, federation_code, isFederation },
+            { id, email, federation_code, isFederation },
             SECRET_KEY,
             { expiresIn: "7d" }
         );
@@ -237,6 +236,85 @@ router.put('/updateSociety', async (req, res) => {
 //         return res.status(500).json({ message: "Internal Server Error" });
 //     }
 // });
+
+router.post('/addSociety', async (req, res) => {
+  const { federationCode, societyName, societyType } = req.body;
+
+  if (!federationCode || !societyName || !societyType) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    const societyCode = await generateSocietyCode(new Set());
+
+    const result = await pool.query(
+      "INSERT INTO society (society_code, federation_code, society_name, society_type) VALUES ($1, $2, $3, $4) RETURNING *",
+      [societyCode, federationCode, societyName, societyType]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error("Error adding society:", error);
+    res.status(500).json({ error: "Server Error" });
+  }
+});
+
+router.get('/details/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      'SELECT id, federation_code, name, email, apartment, tenement FROM federation WHERE id = $1',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Federation not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching federation details:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.put('/change-password', async (req, res) => {
+  const { federationId, currentPassword, newPassword } = req.body;
+
+  if (!federationId || !currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  try {
+    const result = await pool.query(
+      'SELECT password FROM federation WHERE id = $1',
+      [federationId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Federation not found' });
+    }
+
+    const validPassword = await bcrypt.compare(currentPassword, result.rows[0].password);
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Incorrect current password' });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await pool.query(
+      'UPDATE federation SET password = $1 WHERE id = $2',
+      [hashedPassword, federationId]
+    );
+
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    console.error('Error updating password:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
 
 
 module.exports = router;

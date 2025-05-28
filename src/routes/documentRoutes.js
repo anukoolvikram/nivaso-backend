@@ -1,46 +1,32 @@
 const express = require('express');
-const multer = require('multer');
-const fs = require('fs');
-const path = require('path');
 const pool = require("../models/db");
 
 const router = express.Router();
 
-// Ensure uploads folder exists
-const uploadDir = path.join(__dirname, '..', '../uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+// POST
+router.post('/post', async (req, res) => {
+  const { title, society_id, url } = req.body;
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
-});
-const upload = multer({ storage });
-
-// 📤 Upload a document for a society
-router.post('/', upload.single('file'), async (req, res) => {
-  const { title, society_id } = req.body;
-  const file = req.file;
-
-  if (!title || !file || !society_id) {
-    return res.status(400).json({ error: 'Title, file, and society_id are required' });
+  if (!title || !url || !society_id) {
+    return res.status(400).json({ error: 'Title, URL, and society_id are required' });
   }
 
   try {
     const result = await pool.query(
-      `INSERT INTO society_documents (society_id, title, filename, path)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [society_id, title, file.filename, file.path]
+      `INSERT INTO society_documents (society_id, title, url)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [society_id, title, url]
     );
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    console.error('Upload failed:', err);
-    res.status(500).json({ error: 'Failed to upload document' });
+    console.error('Upload failed:', err.message, err.stack);
+    res.status(500).json({ error: 'Failed to save document' });
   }
 });
 
-// 📥 Get all documents for a society
-router.get('/', async (req, res) => {
+// GET
+router.get('/get', async (req, res) => {
   const { society_id } = req.query;
 
   if (!society_id) {
@@ -59,8 +45,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 🗑️ Delete a document
-router.delete('/:id', async (req, res) => {
+// DELETE
+router.delete('/delete/:id', async (req, res) => {
   const docId = parseInt(req.params.id);
 
   try {
@@ -73,17 +59,10 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    const doc = fileRes.rows[0];
-
     await pool.query(`DELETE FROM society_documents WHERE id = $1`, [docId]);
 
-    fs.unlink(doc.path, (err) => {
-      if (err) {
-        console.error('File delete error:', err);
-        return res.status(500).json({ error: 'File deleted from DB, but failed on disk' });
-      }
-      res.json({ message: 'Document deleted successfully' });
-    });
+    // No local file deletion needed
+    res.json({ message: 'Document deleted successfully' });
   } catch (err) {
     console.error('Delete failed:', err);
     res.status(500).json({ error: 'Failed to delete document' });

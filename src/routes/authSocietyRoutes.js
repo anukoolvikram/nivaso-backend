@@ -59,6 +59,7 @@ router.post("/register", async (req, res) => {
             {
                 society_code: user.society_code,
                 email: user.email,
+                id:user.id
             },
             SECRET_KEY,
             { expiresIn: "7d" }
@@ -107,7 +108,7 @@ router.post("/login", async (req, res) => {
             {
                 society_code: user.society_code,
                 email: user.email,
-                society_id:user.id
+                id:user.id
             },
             SECRET_KEY,
             { expiresIn: "7d" }

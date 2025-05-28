@@ -37,21 +37,23 @@ router.get('/all-notices', async (req, res) => {
 router.post('/post-notice', async (req, res) => {
     const { title, description, type, society_id } = req.body;
 
+    const date_posted = new Date();
+
     // 🔐 Basic validation
     if (!title || !type || !society_id) {
         return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // description can be = ('announcement', 'notice', 'poll', 'lost_and_found')
 
+    // description can be = ('announcement', 'notice', 'poll', 'lost_and_found')
     try {
         const query = `
-            INSERT INTO notices (title, description, type, society_id, approved)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO notices (title, description, type, society_id, approved, date_posted)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
         `;
 
-        const values = [title, description, type, society_id, true];
+        const values = [title, description, type, society_id, true, date_posted];
 
         const result = await pool.query(query, values);
 
@@ -209,8 +211,8 @@ router.put('/approve-notice/:notice_id', async (req, res) => {
     }
   });
 
-// federation notices routes
 
+// FEDERATION NOTICE ROUTES *********************************
 router.get('/federation-notice/get/:id', async (req, res) => {
   const fed_id = req.params.id;
 
@@ -244,17 +246,19 @@ router.post('/federation-notice/post', async (req, res) => {
   }
 });
 
-router.put('/federation-notice/edit/:id', async (req, res) => {
+router.put('/federation-notice/update/:id', async (req, res) => {
   const { id } = req.params;
   const { title, description, type } = req.body;
+
+  const curr_date=new Date();
 
   try {
     const result = await pool.query(
       `UPDATE federation_notices 
-       SET title = $1, description = $2, type = $3, date_posted = NOW() 
-       WHERE id = $4 
+       SET title = $1, description = $2, type = $3, date_posted = $4
+       WHERE id = $5
        RETURNING *`,
-      [title, description, type, id]
+      [title, description, type, curr_date, id]
     );
 
     if (result.rowCount === 0) {
@@ -280,12 +284,7 @@ router.get('/federation-id/:id', async (req, res) => {
     if (societyResult.rows.length === 0) {
       return res.status(404).json({ error: 'Society not found' });
     }
-
     const federationCode = societyResult.rows[0].federation_code;
-
-    // console.log("(((((((((((((((((((")
-    // console.log(federationCode)
-
     const federationResult = await pool.query(
       'SELECT id FROM federation WHERE federation_code = $1',
       [federationCode]
