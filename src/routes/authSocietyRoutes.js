@@ -3,8 +3,10 @@ const bcrypt = require("bcryptjs");
 const pool = require("../models/db");
 const router = express.Router();
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 
 const SECRET_KEY = process.env.SECRET_KEY;
+
 
 // SOCIETY SETUP by SOCIETY ADMIN
 router.post("/register", async (req, res) => {
@@ -144,6 +146,93 @@ router.get("/getSocietyCode/:email", async (req, res) => {
         client.release();
     }
 });
+
+// REGISTER WITHOUT SOCIETY CODE AND FEDERATION CODE
+router.post("/self-register", async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+        let { email, password, society_name, no_of_wings, floor_per_wing, rooms_per_floor, society_type } = req.body;
+
+        // Constants for self-registered societies
+        const federation_code = "FED17032025";
+
+        // Generate a unique society code
+        const generateSocietyCode = async () => {
+            let newCode;
+            let isUnique = false;
+            while (!isUnique) {
+                newCode = "SOC" + crypto.randomBytes(4).toString("hex");
+                const check = await client.query("SELECT * FROM society WHERE society_code = $1", [newCode]);
+                if (check.rows.length === 0) isUnique = true;
+            }
+            return newCode;
+        };
+
+        const society_code = await generateSocietyCode();
+
+        // Check email duplication
+        const emailCheck = await pool.query("SELECT * FROM society WHERE email = $1", [email]);
+        if (emailCheck.rows.length > 0) {
+            return res.status(400).json({ error: "Email is already registered" });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        const insertSociety = await client.query(
+            `INSERT INTO society (email, password, society_name, no_of_wings, floor_per_wing, rooms_per_floor, society_code, federation_code, society_type)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+            [email, hashedPassword, society_name, no_of_wings, floor_per_wing, rooms_per_floor, society_code, federation_code, society_type]
+        );
+
+        const user = insertSociety.rows[0];
+
+        // Generate flats
+        let flats = [];
+        for (let wing = 0; wing < no_of_wings; wing++) {
+            let wingName = String.fromCharCode(65 + wing);
+            for (let floor = 1; floor <= floor_per_wing; floor++) {
+                for (let room = 1; room <= rooms_per_floor; room++) {
+                    let flat_id = `${wingName}${floor.toString().padStart(2, "0")}${room.toString().padStart(2, "0")}`;
+                    flats.push({ society_code, flat_id });
+                }
+            }
+        }
+
+        const flatInsertQuery = `
+            INSERT INTO flat (society_code, flat_id) 
+            VALUES ${flats.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(",")}
+        `;
+        const flatInsertValues = flats.flatMap(flat => [flat.society_code, flat.flat_id]);
+
+        await client.query(flatInsertQuery, flatInsertValues);
+
+        const token = jwt.sign(
+            {
+                society_code: user.society_code,
+                email: user.email,
+                id: user.id
+            },
+            SECRET_KEY,
+            { expiresIn: "7d" }
+        );
+
+        res.status(201).json({
+            message: "Self-registration successful",
+            society_code,
+            total_flats: flats.length,
+            token,
+            user_type: 'Society'
+        });
+
+    } catch (error) {
+        console.error("Error in self-register route:", error);
+        res.status(500).json({ error: "Server error" });
+    } finally {
+        client.release();
+    }
+});
+
 
 
 // GET Flats list
