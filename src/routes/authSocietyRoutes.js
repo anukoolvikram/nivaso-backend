@@ -504,7 +504,6 @@ router.post('/saveFlatsData', async (req, res) => {
         let updatedOwnerId = owner_id;
         let updatedResidentId = resident_id;
 
-
         // Basic validations
         if (owner_email && !isValidEmail(owner_email)) {
             return res.status(400).json({ error: "Invalid owner email format" });
@@ -524,15 +523,17 @@ router.post('/saveFlatsData', async (req, res) => {
             }
         }
 
-
         // === Check for duplicate owner email ===
         if (owner_email) {
             const existingOwner = await client.query(
-                `SELECT id FROM resident WHERE email = $1`,
+                `SELECT id FROM resident WHERE LOWER(email) = LOWER($1)`,
                 [owner_email]
             );
 
-            if (existingOwner.rows.length > 0 && existingOwner.rows[0].id !== owner_id) {
+            if (
+                existingOwner.rows.length > 0 &&
+                String(existingOwner.rows[0].id) !== String(owner_id)
+            ) {
                 return res.status(400).json({ error: `Email already exists.` });
             }
         }
@@ -540,11 +541,14 @@ router.post('/saveFlatsData', async (req, res) => {
         // === Check for duplicate resident email ===
         if (occupancy === 'Rented' && resident_email) {
             const existingResident = await client.query(
-                `SELECT id FROM resident WHERE email = $1`,
+                `SELECT id FROM resident WHERE LOWER(email) = LOWER($1)`,
                 [resident_email]
             );
 
-            if (existingResident.rows.length > 0 && existingResident.rows[0].id !== resident_id) {
+            if (
+                existingResident.rows.length > 0 &&
+                String(existingResident.rows[0].id) !== String(resident_id)
+            ) {
                 return res.status(400).json({ error: `Email already exists.` });
             }
         }
@@ -613,6 +617,7 @@ router.post('/saveFlatsData', async (req, res) => {
         client.release();
     }
 });
+
 
 
 
@@ -771,6 +776,58 @@ async function getCompleteFlatData(client, flatId) {
         resident
     };
 }
+
+
+
+// ROUTES FOR FLAT DOCUMENTS
+
+router.post('/flatDocuments/post', async (req, res) => {
+  const { flat_id, title, url } = req.body;
+
+  if (!flat_id || !title || !url) {
+    return res.status(400).json({ error: "All fields are required" });
+  }
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO flat_documents (flat_id, document_name, document_url)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [flat_id, title, url]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Upload error:', err);
+    res.status(500).json({ error: 'Failed to upload document' });
+  }
+});
+
+router.get('/flatDocuments/get/:id', async (req, res) => {
+  const flat_id  = req.params.id;
+
+  if (!flat_id) return res.status(400).json({ error: "flat_id required" });
+
+  try {
+    const result = await pool.query(
+      `SELECT * FROM flat_documents WHERE flat_id = $1 ORDER BY uploaded_at DESC`,
+      [flat_id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch documents' });
+  }
+});
+
+
+router.delete('/flatDocuments/delete/:id', async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM flat_documents WHERE id = $1`, [req.params.id]);
+    res.json({ message: "Document deleted" });
+  } catch (err) {
+    console.error("Delete error:", err);
+    res.status(500).json({ error: "Failed to delete" });
+  }
+});
 
 
 module.exports = router;
