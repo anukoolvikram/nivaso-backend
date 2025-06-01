@@ -35,34 +35,79 @@ router.get('/all-notices', async (req, res) => {
   
 // ADD NOTICE BY SOCIETY
 router.post('/post-notice', async (req, res) => {
-    const { title, description, type, society_id } = req.body;
-
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { title, description, type, society_id, options } = req.body;
     const date_posted = new Date();
 
-    // 🔐 Basic validation
     if (!title || !type || !society_id) {
-        return res.status(400).json({ error: 'Missing required fields' });
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    const insertNoticeText = `
+      INSERT INTO notices (title, description, type, society_id, approved, date_posted)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `;
+    const values = [title, description, type, society_id, true, date_posted];
+    const result = await client.query(insertNoticeText, values);
 
-    // description can be = ('announcement', 'notice', 'poll', 'lost_and_found')
-    try {
-        const query = `
-            INSERT INTO notices (title, description, type, society_id, approved, date_posted)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING *
-        `;
-
-        const values = [title, description, type, society_id, true, date_posted];
-
-        const result = await pool.query(query, values);
-
-        res.status(201).json(result.rows[0]);  
-    } catch (error) {
-        console.error('Error posting notice:', error);
-        res.status(500).json({ error: 'Failed to post notice' });
+    const noticeId = result.rows[0].notice_id;
+    if (type === 'poll' && Array.isArray(options)) {
+      for (let optText of options) {
+        await client.query(
+          `INSERT INTO poll_options (notice_id, text) VALUES ($1, $2)`,
+          [noticeId, optText]
+        );
+      }
     }
+
+    await client.query('COMMIT');
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error posting notice:', error);
+    res.status(500).json({ error: 'Failed to post notice' });
+  } finally {
+    client.release();
+  }
 });
+
+
+// GET /notices/poll-options/:noticeId
+router.get('/poll-options/:id', async (req, res) => {
+  const { id } = req.params;
+  const result = await pool.query(
+    `SELECT option_id, text, votes FROM poll_options WHERE notice_id = $1`,
+    [id]
+  );
+  res.json(result.rows);
+});
+
+// POST /notices/vote
+router.post('/vote', async (req, res) => {
+  const { option_id, user_id } = req.body;
+  // check if user already voted
+  const alreadyVoted = await pool.query(
+    `SELECT * FROM poll_votes WHERE option_id = $1 AND user_id = $2`,
+    [option_id, user_id]
+  );
+  if (alreadyVoted.rowCount > 0) {
+    return res.status(400).json({ message: "Already voted" });
+  }
+  // record vote
+  await pool.query(
+    `INSERT INTO poll_votes (option_id, user_id) VALUES ($1, $2)`,
+    [option_id, user_id]
+  );
+  await pool.query(
+    `UPDATE poll_options SET votes = votes + 1 WHERE option_id = $1`,
+    [option_id]
+  );
+  res.status(200).json({ message: "Vote counted" });
+});
+
 
 // EDIT 
 router.put('/edit-notice/:id', async (req, res) => {
