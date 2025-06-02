@@ -76,14 +76,19 @@ router.post('/post-notice', async (req, res) => {
 
 
 // GET /notices/poll-options/:noticeId
+// after: force ordering by the insertion‐order (option_id)
 router.get('/poll-options/:id', async (req, res) => {
   const { id } = req.params;
   const result = await pool.query(
-    `SELECT option_id, text, votes FROM poll_options WHERE notice_id = $1`,
+    `SELECT option_id, text, votes
+       FROM poll_options
+      WHERE notice_id = $1
+      ORDER BY option_id ASC`,   
     [id]
   );
   res.json(result.rows);
 });
+
 
 // POST /notices/vote
 router.post('/vote', async (req, res) => {

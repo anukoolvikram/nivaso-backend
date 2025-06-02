@@ -779,8 +779,7 @@ async function getCompleteFlatData(client, flatId) {
 
 
 
-// ROUTES FOR FLAT DOCUMENTS
-
+// FLAT SETUP DOCUMENTS
 router.post('/flatDocuments/post', async (req, res) => {
   const { flat_id, title, url } = req.body;
 
@@ -818,7 +817,6 @@ router.get('/flatDocuments/get/:id', async (req, res) => {
   }
 });
 
-
 router.delete('/flatDocuments/delete/:id', async (req, res) => {
   try {
     await pool.query(`DELETE FROM flat_documents WHERE id = $1`, [req.params.id]);
@@ -828,6 +826,28 @@ router.delete('/flatDocuments/delete/:id', async (req, res) => {
     res.status(500).json({ error: "Failed to delete" });
   }
 });
+
+
+// USER PROFILE
+router.get('/profile/:id', async (req, res) => {
+  const { id } = req.params
+
+  try {
+    const result = await pool.query(
+      'SELECT * FROM society WHERE id = $1',
+      [id]
+    )
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Society not found' })
+    }
+
+    res.json(result.rows[0])
+  } catch (err) {
+    console.error('Error fetching society:', err)
+    res.status(500).json({ message: 'Server error' })
+  }
+})
 
 
 module.exports = router;

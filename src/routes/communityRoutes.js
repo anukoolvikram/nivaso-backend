@@ -10,12 +10,14 @@ router.post('/add-blog', async (req, res) => {
   try {
     await client.query('BEGIN');
 
+    const post_date=new Date();
+
     // Insert blog post
     const postResult = await client.query(
-      `INSERT INTO blogposts (title, content, author_id, society_id)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO blogposts (title, content, author_id, society_id, post_date)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING id`,
-      [blog.title, blog.content, blog.author, blog.society_id]
+      [blog.title, blog.content, blog.author, blog.society_id, post_date]
     );
 
     console.log('postResult', postResult);
