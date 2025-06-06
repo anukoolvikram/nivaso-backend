@@ -12,7 +12,7 @@ router.post('/add-blog', async (req, res) => {
     const post_date=new Date();
 
     const postResult = await client.query(
-      `INSERT INTO blogposts (title, content, author_id, society_id, post_date)
+      `INSERT INTO blogposts (title, content, author_id, society_code, post_date)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id`,
       [blog.title, blog.content, blog.author, blog.society_id, post_date]
@@ -33,6 +33,16 @@ router.post('/add-blog', async (req, res) => {
       );
     }
 
+    // adding images
+    if (Array.isArray(blog.images) && blog.images.length > 0) {
+      for (let url of blog.images) {
+        await client.query(
+          `INSERT INTO blog_images (blog_id, image_url)
+           VALUES ($1, $2)`,
+          [post_id, url]
+        );
+      }
+    }
     await client.query('COMMIT');
     res.status(201).json({ message: 'Blog post created successfully', post_id, success:true });
   } 
@@ -55,10 +65,10 @@ router.post('/add-blog', async (req, res) => {
     try {
       await client.query('BEGIN');
       const postResult = await client.query(
-        `INSERT INTO blogposts (title, content, society_id, by_admin, post_date)
+        `INSERT INTO blogposts (title, content, society_code, by_admin, post_date)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
-        [blog.title, blog.content, blog.society_id, true, date_posted]
+        [blog.title, blog.content, blog.society_code, true, date_posted]
       );
       const post_id = postResult.rows[0].id;
 
@@ -75,12 +85,21 @@ router.post('/add-blog', async (req, res) => {
           [post_id, tag.tag_id]
         );        
       }
-      
+
+      // adding images
+      if (Array.isArray(blog.images) && blog.images.length > 0) {
+        for (let url of blog.images) {
+          await client.query(
+            `INSERT INTO blog_images (blog_id, image_url)
+             VALUES ($1, $2)`,
+            [post_id, url]
+          );
+        }
+      }
       await client.query('COMMIT');
       res.status(201).json({ message: 'Blog post created successfully', post_id, success:true });
     } 
     catch (err) {
-      console.log(err)
       await client.query('ROLLBACK');
       console.error('Error adding blog post:', err);
       res.status(500).json({ error: 'Failed to add blog post' });
@@ -93,32 +112,71 @@ router.post('/add-blog', async (req, res) => {
 
 // GET ALL BLOGS FOR A SOCIETY
 router.get('/all-blogs', async (req, res) => {
-    const society_id = req.query.society_id;
-    if (!society_id) {
-      return res.status(400).json({ error: 'society_id is required' });
+    const society_code = req.query.society_code;
+    if (!society_code) {
+      return res.status(400).json({ error: 'society_code is required' });
     }
 
     try {
-        const blogQuery = `
-        SELECT bp.id, bp.title, bp.content, bp.post_date, bp.author_id, bp.by_admin
-        FROM blogposts bp
-        WHERE bp.society_id = $1
-        ORDER BY bp.post_date DESC
-      `;
-      const blogPosts = await pool.query(blogQuery, [society_id]);
+      const blogQuery = `
+      SELECT
+        bp.id,
+        bp.title,
+        bp.content,
+        bp.post_date,
+        bp.author_id,
+        bp.by_admin,
+        COALESCE(
+          json_agg(bi.image_url) FILTER (WHERE bi.image_url IS NOT NULL),
+          '[]'
+        ) AS images
+      FROM blogposts bp
+      LEFT JOIN blog_images bi
+        ON bp.id = bi.blog_id
+      WHERE bp.society_code = $1
+      GROUP BY bp.id
+      ORDER BY bp.post_date DESC;
+    `;
 
-      const blogData = await Promise.all(blogPosts.rows.map(async (post) => {
-        const tagsRes = await pool.query(
-          `SELECT t.tag_name 
-           FROM blogtags bt
-           JOIN tags t ON bt.tag_id = t.tag_id
-           WHERE bt.post_id = $1`,
-          [post.id]
-        );
+   const blogPosts = await pool.query(blogQuery, [society_code]);
+
+   // Now fetch tags for each post just like before
+   const blogData = await Promise.all(
+     blogPosts.rows.map(async (post) => {
+       const tagsRes = await pool.query(
+         `SELECT t.tag_name 
+          FROM blogtags bt
+          JOIN tags t ON bt.tag_id = t.tag_id
+          WHERE bt.post_id = $1`,
+         [post.id]
+       );
+       return {
+         ...post,
+         tags: tagsRes.rows.map(t => t.tag_name)
+       };
+     })
+   );
+   res.status(200).json(blogData);
+      //   const blogQuery = `
+      //   SELECT bp.id, bp.title, bp.content, bp.post_date, bp.author_id, bp.by_admin
+      //   FROM blogposts bp
+      //   WHERE bp.society_id = $1
+      //   ORDER BY bp.post_date DESC
+      // `;
+      // const blogPosts = await pool.query(blogQuery, [society_id]);
+
+      // const blogData = await Promise.all(blogPosts.rows.map(async (post) => {
+      //   const tagsRes = await pool.query(
+      //     `SELECT t.tag_name 
+      //      FROM blogtags bt
+      //      JOIN tags t ON bt.tag_id = t.tag_id
+      //      WHERE bt.post_id = $1`,
+      //     [post.id]
+      //   );
   
-        return { ...post, tags: tagsRes.rows.map(tag => tag.tag_name), };
-      }));
-      res.status(200).json(blogData);
+      //   return { ...post, tags: tagsRes.rows.map(tag => tag.tag_name), };
+      // }));
+      // res.status(200).json(blogData);
     } 
     catch (err) {
       console.error('Error fetching blog posts:', err);
@@ -188,21 +246,34 @@ router.get('/all-blogs', async (req, res) => {
           [id, tagsToAdd]
         );
       }
+
+  // editing images
+   await client.query(`DELETE FROM blog_images WHERE blog_id = $1`, [id]);
+   if (Array.isArray(images) && images.length > 0) {
+     for (let url of images) {
+       await client.query(
+         `INSERT INTO blog_images (blog_id, image_url) VALUES ($1, $2)`,
+         [id, url]
+       );
+     }
+   }
   
       await client.query('COMMIT');
   
       // 5. Get the updated blog with all tags
       const updatedBlogRes = await client.query(
         `SELECT 
-           bp.id, bp.title, bp.content, bp.post_date, 
-           r.name AS author_name,
-           array_agg(t.tag_name) AS tags
-         FROM blogposts bp
-         JOIN resident r ON bp.author_id = r.id
-         LEFT JOIN blogtags bt ON bp.id = bt.post_id
-         LEFT JOIN tags t ON bt.tag_id = t.tag_id
-         WHERE bp.id = $1
-         GROUP BY bp.id, r.name`,
+         bp.id, bp.title, bp.content, bp.post_date, 
+         r.name AS author_name,
+         array_agg(t.tag_name) AS tags,
+         COALESCE(json_agg(bi.image_url) FILTER (WHERE bi.image_url IS NOT NULL), '[]') AS images
+        FROM blogposts bp
+        JOIN resident r ON bp.author_id = r.id
+        LEFT JOIN blogtags bt ON bp.id = bt.post_id
+        LEFT JOIN tags t ON bt.tag_id = t.tag_id
+        LEFT JOIN blog_images bi ON bp.id = bi.blog_id
+        WHERE bp.id = $1
+        GROUP BY bp.id, r.name`,
         [id]
       );
   
@@ -226,17 +297,25 @@ router.get('/all-blogs', async (req, res) => {
 // DELETE BLOG BY ADMIN
 router.delete('/delete-blog/:id', async (req, res) => {
     const blogId = req.params.id;
-    
     try {
+        // await pool.query('BEGIN');
+        // await pool.query(
+        //     'DELETE FROM blogtags WHERE post_id = $1',
+        //     [blogId]
+        // );
+
+        // const result = await pool.query(
+        //     'DELETE FROM blogposts WHERE id = $1 RETURNING *',
+        //     [blogId]
+        // );
+
         await pool.query('BEGIN');
-        await pool.query(
-            'DELETE FROM blogtags WHERE post_id = $1',
-            [blogId]
-        );
+        await pool.query('DELETE FROM blogtags WHERE post_id = $1', [blogId]);
+        await pool.query('DELETE FROM blog_images WHERE blog_id = $1', [blogId]);
 
         const result = await pool.query(
-            'DELETE FROM blogposts WHERE id = $1 RETURNING *',
-            [blogId]
+          'DELETE FROM blogposts WHERE id = $1 RETURNING *',
+          [blogId]
         );
 
         if (result.rows.length === 0) {
@@ -297,6 +376,36 @@ router.get('/author-name/:id', async (req, res) => {
     });
   }
 });
+
+// BLOG FROM id
+router.get('/blog/:id', async (req, res) => {
+  const blogId = req.params.id;
+  try {
+    const query = `
+      SELECT 
+        bp.id, bp.title, bp.content, bp.post_date,
+        r.name AS author_name,
+        COALESCE(array_agg(DISTINCT t.tag_name), '{}') AS tags,
+        COALESCE(json_agg(DISTINCT bi.image_url) FILTER (WHERE bi.image_url IS NOT NULL), '[]') AS images
+      FROM blogposts bp
+      LEFT JOIN resident r ON bp.author_id = r.id
+      LEFT JOIN blogtags bt ON bp.id = bt.post_id
+      LEFT JOIN tags t ON bt.tag_id = t.tag_id
+      LEFT JOIN blog_images bi ON bp.id = bi.blog_id
+      WHERE bp.id = $1
+      GROUP BY bp.id, r.name;
+    `;
+    const result = await pool.query(query, [blogId]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Blog not found' });
+    }
+    res.json({ success: true, blog: result.rows[0] });
+  } catch (err) {
+    console.error('Error fetching blog:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch blog' });
+  }
+});
+
 
   
 module.exports = router;

@@ -850,4 +850,28 @@ router.get('/profile/:id', async (req, res) => {
 })
 
 
+// FEDERATION NAME USING FEDERATION CODE
+router.get('/federation-name', async (req, res) => {
+  const code = req.query.code;
+  if (!code) {
+    return res.status(400).json({ error: "Missing 'code' query parameter." });
+  }
+
+  try {
+    const result = await pool.query(
+      'SELECT name FROM federation WHERE federation_code = $1',
+      [code]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Federation not found." });
+    }
+    const { name } = result.rows[0];
+    return res.json({ name });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
 module.exports = router;
